@@ -11,8 +11,6 @@ from datetime import datetime
 # -----------------------------
 REFERENCE_SHEET_ID = open("reference_sheet.txt").read().strip()
 TIMESHEET_SHEET_ID = open("timesheet.txt").read().strip()
-VOICE_FILE = "daily_note.m4a"
-DATE_TODAY = datetime.now().strftime("%Y-%m-%d")
 
 # -----------------------------
 # STEP 1: CONNECT TO GOOGLE SHEETS
@@ -172,23 +170,27 @@ def append_timesheet(client, entries):
 # -----------------------------
 # MAIN
 # -----------------------------
-if __name__ == "__main__":
+def run_workflow(voice_file):
+
     print("🔄 Starting workflow...")
 
     client = connect_sheets()
     ref_df = load_reference(client)
-#    print(ref_df)
 
     print("🎙️ Transcribing audio...")
-    transcription = transcribe_audio(VOICE_FILE)
-#    transcription = "2 hours doing team management, 0.5 hours doing archive, 1 hours doing limited partnerships, 3 hours doing premium receivable, 2 hours doing terms of engagement"
+
+    transcription = transcribe_audio(voice_file)
+
     print("Transcript:", transcription)
 
     print("📝 Parsing tasks...")
+
     tasks, extracted_date = parse_tasks(transcription)
+
     print("Parsed:", tasks)
 
     print("🔍 Mapping to chargecodes...")
+
     mapped_entries = map_to_chargecodes(tasks, extracted_date, ref_df)
     for m in mapped_entries:
         print(f"{m['hours']}h → {m['chargecode_id']} ({m['matched_with']}, score={m['score']})")
@@ -198,3 +200,8 @@ if __name__ == "__main__":
 
     print("✅ Workflow complete.")
 
+    return {
+        "transcription": transcription,
+        "date": extracted_date,
+        "tasks": tasks
+    }

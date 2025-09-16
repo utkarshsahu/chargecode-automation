@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Voice Workflow</title>
+</head>
+<body>
+  <h1>Record and Upload Voice Note</h1>
+
+  <button id="startBtn">Start Recording</button>
+  <button id="stopBtn" disabled>Stop Recording</button>
+  <p id="status"></p>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let stream;
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const status = document.getElementById("status");
+
+    startBtn.addEventListener("click", async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = event => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          // stop microphone access
+          stream.getTracks().forEach(track => track.stop());
+
+          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+          const formData = new FormData();
+          formData.append("file", audioBlob, "recording.webm");
+
+          status.textContent = "Uploading...";
+
+          try {
+            const response = await fetch("/upload", {
+              method: "POST",
+              body: formData
+            });
+
+            // try parsing JSON safely
+            let resultText = await response.text();
+            try {
+              const resultJson = JSON.parse(resultText);
+              status.textContent = "Done: " + JSON.stringify(resultJson);
+            } catch (e) {
+              status.textContent = "Server response: " + resultText;
+            }
+          } catch (err) {
+            status.textContent = "Error: " + err.message;
+          }
+        };
+
+        mediaRecorder.start();
+        status.textContent = "Recording...";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        status.textContent = "Microphone error: " + err.message;
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        status.textContent = "Processing...";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    });
+  </script>
+</body>
+</html>
+
