@@ -11,3 +11,4 @@ tqdm
 regex
 requests
 torch>=2.2.2,<3.0
+gunicorn
