@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_from_directory
 import os
 from workflow import run_workflow  # <-- your workflow logic lives here
 
+port = int(os.environ.get('PORT', 4000))
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
 UPLOAD_FOLDER = "uploads"
@@ -39,5 +40,5 @@ def upload_file():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host='0.0.0.0', port=port)
 
