@@ -50,33 +50,6 @@ def transcribe_audio(file_path: str) -> str:
                 )
     return transcription.text
 
-# -----------------------------
-# STEP 4: PARSE HOURS & TASKS
-# Example: "I spent 4 hours on data analysis, 2 hours in calls"
-# -----------------------------
-
-def parse_decimal_words(text, word_to_num):
-    """
-    Converts phrases like 'one point five', 'another point five', 'point two five' into numeric floats.
-    """
-    # Match patterns like "one point five", "another point two five", "point five"
-    decimal_pattern = r'(?:another\s+)?(?:(zero|one|two|three|four|five|six|seven|eight|nine|ten)?\s*)?point\s+(two|five|seven|zero|one|three|four|six|eight|nine)(?:\s+(five|two|zero|one|three|four|six|seven|eight|nine))?'
-
-    def repl(match):
-        whole = match.group(1)
-        d1 = match.group(2)
-        d2 = match.group(3)
-
-        val = 0
-        if whole:
-            val += word_to_num[whole]
-        val += word_to_num[d1] / 10
-        if d2:
-            val += word_to_num[d2] / 100
-        return str(val)
-
-    return re.sub(decimal_pattern, repl, text)
-
 def extract_tasks(natural_text: str, model: str = "gpt-4o-mini"):
     """
       Convert natural language time logging into CSV format with two columns: task, hours.
@@ -89,6 +62,7 @@ def extract_tasks(natural_text: str, model: str = "gpt-4o-mini"):
           OpenAI model to use (default: gpt-4o-mini).
 
       """
+
     system_prompt = """You are an assistant that extracts structured time log data.
   Return ONLY valid JSON: a dictionary containing two keys:
   1 'extracted_date': date mentioned by the user for log entry
