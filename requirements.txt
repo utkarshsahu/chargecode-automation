@@ -1,14 +1,14 @@
 Flask
-fuzzywuzzy
 pandas
+rapidfuzz
 gspread
 oauth2client
 google-auth
 google-auth-oauthlib
 httplib2
-openai-whisper
 tqdm
 regex
 requests
-torch>=2.2.2,<3.0
 gunicorn
+python-dotenv
+openai

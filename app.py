@@ -21,19 +21,17 @@ def index():
 # POST: Upload voice & run workflow
 # -------------------------
 @app.route("/upload", methods=["POST"])
-def upload_file():
-    if "file" not in request.files:
-        return jsonify({"error": "No file part"}), 400
+def upload_audio():
+    if "audio_data" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
-
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(filepath)
+    file = request.files["audio_data"]
+    save_path = os.path.join("uploads", file.filename)
+    os.makedirs("uploads", exist_ok=True)
+    file.save(save_path)
 
     try:
-        result = run_workflow(filepath)  # call your workflow
+        result = run_workflow(save_path)  # call your workflow
         return jsonify(result)  # return JSON directly
     except Exception as e:
         return jsonify({"error": str(e)}), 500

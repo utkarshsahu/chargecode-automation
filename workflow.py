@@ -1,16 +1,19 @@
-import whisper
 import re
 import pandas as pd
-from fuzzywuzzy import process
+from rapidfuzz import process, fuzz
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 REFERENCE_SHEET_ID = open("reference_sheet.txt").read().strip()
 TIMESHEET_SHEET_ID = open("timesheet.txt").read().strip()
+load_dotenv()
 
 # -----------------------------
 # STEP 1: CONNECT TO GOOGLE SHEETS
@@ -33,10 +36,16 @@ def load_reference(client):
 # -----------------------------
 # STEP 3: TRANSCRIBE VOICE NOTE
 # -----------------------------
-def transcribe_audio(file_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(file_path)
-    return result["text"]
+def transcribe_audio(file_path: str) -> str:
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    with open(file_path, "rb") as audio_file:
+        transcription = client.audio.transcriptions.create(
+            model="whisper-1",   # or "whisper-1"
+            file=audio_file
+        )
+    return transcription.text
 
 # -----------------------------
 # STEP 4: PARSE HOURS & TASKS
@@ -107,7 +116,7 @@ def parse_tasks(transcription):
     # Create pattern that matches both digits and word numbers
     word_numbers = '|'.join(word_to_num.keys())
 
-    pattern = rf"({word_numbers}|\d+(\.\d+)?+)\s*hour[s]?\s*(?:on|for|doing)?\s*([\w\s]+)"
+    pattern = rf"({word_numbers}|\d+(\.\d+)?+)\s*hour[s]?\s*(?:of|on|for|doing)?\s*([\w\s]+)"
 
     matches = re.findall(pattern, transcription.lower())
     tasks = []
@@ -126,29 +135,49 @@ def parse_tasks(transcription):
 # -----------------------------
 # STEP 5: MAP TASKS TO CHARGECODES
 # -----------------------------
-def map_to_chargecodes(tasks, date, ref_df):
-    mapped = []
+from rapidfuzz import process, fuzz
 
-    # Search across description & info
-    choices = ref_df["Description"].tolist() + ref_df["Note"].tolist()
-    hours_till_now = 0
+def map_to_chargecodes(tasks, date, ref_df):
+    """
+    tasks: list of dicts like [{"task": "...", "hours": 2}, ...]
+    date: date (kept as-is)
+    ref_df: pandas.DataFrame with columns: "Description", "Note", "WBS element"
+
+    Returns: list of mappings with row_number (0-based), row_index (df index label), chargecode_id, score, etc.
+    """
+    mapped = []
+    sep = " ||| "  # unlikely to appear in descriptions/notes
+    hours_till_now = 0.0
+
+    # Build choices: safe string for each row
+    #descs = ref_df["Description"].fillna("").astype(str).tolist()
+    #notes = ref_df["Note"].fillna("").astype(str).tolist()
+    choices = ref_df["Description"].tolist()
 
     for entry in tasks:
-        task = entry["task"]
-        hours = entry["hours"]
+        task = str(entry.get("task", "")).strip()
+        hours = entry.get("hours", 0)
+        print("hello1")
+        # rapidfuzz.process.extractOne returns (match_string, score, index)
+        match_result = process.extractOne(task, choices, scorer=fuzz.token_set_ratio)
 
-        match, score = process.extractOne(task, choices)
+        match_str, score, pos = match_result
+        print("hello2")
 
-        # Find corresponding chargecode ID
-        row = ref_df[(ref_df["Description"] == match) | (ref_df["Note"] == match)].iloc[0]
+        # get df row by integer location pos
+        row_label = ref_df.index[pos]           # actual index label (could be non-int)
+        chargecode_id = ref_df.iloc[pos]["WBS element"]
+
         mapped.append({
             "date": date,
-            "chargecode_id": row["WBS element"],
+            "chargecode_id": chargecode_id,
             "hours": hours,
-            "matched_with": match,
-            "score": score
+            "matched_with": match_str,
+            "score": score,
         })
+
         hours_till_now = hours_till_now + hours
+        print("Hello4")
 
     # Scale total hours to 8 hours in a day
 

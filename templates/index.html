@@ -2,83 +2,49 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Voice Workflow</title>
+  <title>Voice Recorder</title>
+  <script src="https://cdn.webrtc-experiment.com/RecordRTC.js"></script>
 </head>
 <body>
-  <h1>Record and Upload Voice Note</h1>
-
-  <button id="startBtn">Start Recording</button>
-  <button id="stopBtn" disabled>Stop Recording</button>
-  <p id="status"></p>
+  <h2>Voice Recorder</h2>
+  <button id="start">Start Recording</button>
+  <button id="stop" disabled>Stop Recording</button>
 
   <script>
-    let mediaRecorder;
-    let audioChunks = [];
-    let stream;
+    let recorder;
+    let audioStream;
 
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
-    const status = document.getElementById("status");
+    document.getElementById("start").onclick = async function() {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = RecordRTC(audioStream, {
+        type: "audio",
+        mimeType: "audio/wav" // you can use audio/mp3 if supported
+      });
+      recorder.startRecording();
+      document.getElementById("start").disabled = true;
+      document.getElementById("stop").disabled = false;
+    };
 
-    startBtn.addEventListener("click", async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
+    document.getElementById("stop").onclick = async function() {
+      recorder.stopRecording(async function() {
+        let blob = recorder.getBlob();
+        let fileName = "recording.wav";
+        let formData = new FormData();
+        formData.append("audio_data", blob, fileName);
 
-        audioChunks = [];
+        let response = await fetch("/upload", {
+          method: "POST",
+          body: formData
+        });
 
-        mediaRecorder.ondataavailable = event => {
-          if (event.data.size > 0) {
-            audioChunks.push(event.data);
-          }
-        };
+        let result = await response.json();
+        console.log("Transcription Result:", result);
 
-        mediaRecorder.onstop = async () => {
-          // stop microphone access
-          stream.getTracks().forEach(track => track.stop());
-
-          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-          const formData = new FormData();
-          formData.append("file", audioBlob, "recording.webm");
-
-          status.textContent = "Uploading...";
-
-          try {
-            const response = await fetch("/upload", {
-              method: "POST",
-              body: formData
-            });
-
-            // try parsing JSON safely
-            let resultText = await response.text();
-            try {
-              const resultJson = JSON.parse(resultText);
-              status.textContent = "Done: " + JSON.stringify(resultJson);
-            } catch (e) {
-              status.textContent = "Server response: " + resultText;
-            }
-          } catch (err) {
-            status.textContent = "Error: " + err.message;
-          }
-        };
-
-        mediaRecorder.start();
-        status.textContent = "Recording...";
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-      } catch (err) {
-        status.textContent = "Microphone error: " + err.message;
-      }
-    });
-
-    stopBtn.addEventListener("click", () => {
-      if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();
-        status.textContent = "Processing...";
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-      }
-    });
+        audioStream.getTracks().forEach(track => track.stop());
+        document.getElementById("start").disabled = false;
+        document.getElementById("stop").disabled = true;
+      });
+    };
   </script>
 </body>
 </html>
