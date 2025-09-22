@@ -4,9 +4,12 @@ from rapidfuzz import process, fuzz
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-from openai import OpenAI
+from openai import OpenAI, ChatCompletion
 from dotenv import load_dotenv
 import os
+import io
+import csv
+import json
 
 # -----------------------------
 # CONFIG
@@ -42,9 +45,9 @@ def transcribe_audio(file_path: str) -> str:
 
     with open(file_path, "rb") as audio_file:
         transcription = client.audio.transcriptions.create(
-            model="whisper-1",   # or "whisper-1"
-            file=audio_file
-        )
+                model="whisper-1",   # or "whisper-1"
+                file=audio_file
+                )
     return transcription.text
 
 # -----------------------------
@@ -74,68 +77,60 @@ def parse_decimal_words(text, word_to_num):
 
     return re.sub(decimal_pattern, repl, text)
 
-def parse_tasks(transcription):
-# Dictionary to map word numbers to digits
-    # Dictionary to map word numbers to digits
-    word_to_num = {
-        'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
-        'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
-        'ten': 10
+def extract_tasks(natural_text: str, model: str = "gpt-4o-mini"):
+    """
+      Convert natural language time logging into CSV format with two columns: task, hours.
+
+      Parameters
+      ----------
+      natural_text : str
+          Free-form text like "Today is 23rd Sept. I did 2 hours of X, spent 3 hours on Y..."
+      model : str
+          OpenAI model to use (default: gpt-4o-mini).
+
+      """
+    system_prompt = """You are an assistant that extracts structured time log data.
+  Return ONLY valid JSON: a dictionary containing two keys:
+  1 'extracted_date': date mentioned by the user for log entry
+  2. 'tasks': a list of objects with exactly two keys: task (string), hours (integer).
+  - Preserve the order tasks are mentioned.
+  - Ignore dates, words like "today", "spent", "doing".
+  - Ensure hours are numeric (no text like "two").
+  - Examples:
+  1. Today is 1st September 2025. I spent 2 hours doing <task 1>, then I did 1 hour of <task 2> and also I was involved in 2 hours of <task 3>
+  Output:
+    {
+        'extracted_date': '01-Sept-2025',
+        'tasks': [{'task': <task 1>, 'hours': 2},
+                {'task': <task 2>, 'hours': 1},
+                {'task': <task 3>, 'hours': 3}]
     }
+  """
 
-    transcription = parse_decimal_words(transcription.lower(), word_to_num)
+    user_prompt = f"Extract the tasks and hours from this text:\n\n{natural_text}"
 
-    # Extract date from transcription
-    # Pattern matches various date formats: DD/MM/YYYY, DD-MM-YYYY, Month DD, YYYY, etc.
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    print('hello1')
 
-    date_patterns = [
-        (r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})', '%d/%m/%Y'),  # DD/MM/YYYY or DD-MM-YYYY
-        (r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})', '%d/%m/%y'),   # DD/MM/YY or DD-MM-YY
-        (r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+(\d{4})', '%B %d %Y'),  # Month DD, YYYY
-        (r'(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})', '%d %B %Y'),  # DD Month YYYY
-        (r'(\d{1,2})(st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})', '%d %B %Y')  # DDth Month YYYY
-    ]
+    response = client.chat.completions.create(
+              model=model,
+              messages=[{"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}],
+              temperature=0)
 
-    extracted_date = None
-    for pattern, date_format in date_patterns:
-        match = re.search(pattern, transcription.lower())
-        if match:
-            matched_text = match.group(0)
-            try:
-                # Handle ordinal numbers (1st, 2nd, 3rd, 4th) by removing the suffix
-                if 'st' in matched_text or 'nd' in matched_text or 'rd' in matched_text or 'th' in matched_text:
-                    matched_text = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', matched_text)
+    content = response.choices[0].message.content.strip()
 
-                # Parse the date and convert to YYYY-MM-DD format
-                parsed_date = datetime.strptime(matched_text, date_format)
-                extracted_date = parsed_date.strftime("%Y-%m-%d")
-                break
-            except ValueError:
-                raise ValueError("Please enter a date in valid date formats")
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        raise ValueError(f"Model did not return valid JSON:\n{content}")
 
-    # Create pattern that matches both digits and word numbers
-    word_numbers = '|'.join(word_to_num.keys())
 
-    pattern = rf"({word_numbers}|\d+(\.\d+)?+)\s*hour[s]?\s*(?:of|on|for|doing)?\s*([\w\s]+)"
-
-    matches = re.findall(pattern, transcription.lower())
-    tasks = []
-
-    for hours_str, _, task in matches:
-        # Convert word numbers to digits if needed
-        if hours_str in word_to_num:
-            hours = float(word_to_num[hours_str])
-        else:
-            hours = float(hours_str)
-
-        tasks.append({"task": task.strip(), "hours": hours})
-
-    return tasks, extracted_date
+    return result['extracted_date'], result['tasks']
 
 # -----------------------------
 # STEP 5: MAP TASKS TO CHARGECODES
 # -----------------------------
-from rapidfuzz import process, fuzz
 
 def map_to_chargecodes(tasks, date, ref_df):
     """
@@ -146,23 +141,17 @@ def map_to_chargecodes(tasks, date, ref_df):
     Returns: list of mappings with row_number (0-based), row_index (df index label), chargecode_id, score, etc.
     """
     mapped = []
-    sep = " ||| "  # unlikely to appear in descriptions/notes
     hours_till_now = 0.0
 
-    # Build choices: safe string for each row
-    #descs = ref_df["Description"].fillna("").astype(str).tolist()
-    #notes = ref_df["Note"].fillna("").astype(str).tolist()
     choices = ref_df["Description"].tolist()
 
     for entry in tasks:
         task = str(entry.get("task", "")).strip()
         hours = entry.get("hours", 0)
-        print("hello1")
         # rapidfuzz.process.extractOne returns (match_string, score, index)
         match_result = process.extractOne(task, choices, scorer=fuzz.token_set_ratio)
 
         match_str, score, pos = match_result
-        print("hello2")
 
         # get df row by integer location pos
         row_label = ref_df.index[pos]           # actual index label (could be non-int)
@@ -174,10 +163,9 @@ def map_to_chargecodes(tasks, date, ref_df):
             "hours": hours,
             "matched_with": match_str,
             "score": score,
-        })
+            })
 
         hours_till_now = hours_till_now + hours
-        print("Hello4")
 
     # Scale total hours to 8 hours in a day
 
@@ -200,7 +188,6 @@ def append_timesheet(client, entries):
 # MAIN
 # -----------------------------
 def run_workflow(voice_file):
-
     print("🔄 Starting workflow...")
 
     client = connect_sheets()
@@ -214,9 +201,9 @@ def run_workflow(voice_file):
 
     print("📝 Parsing tasks...")
 
-    tasks, extracted_date = parse_tasks(transcription)
+    extracted_date, tasks = extract_tasks(transcription)
 
-    print("Parsed:", tasks)
+    print(f"Parsed: {tasks}, {extracted_date}")
 
     print("🔍 Mapping to chargecodes...")
 
@@ -230,7 +217,7 @@ def run_workflow(voice_file):
     print("✅ Workflow complete.")
 
     return {
-        "transcription": transcription,
-        "date": extracted_date,
-        "tasks": tasks
-    }
+            "transcription": transcription,
+            "date": extracted_date,
+            "tasks": tasks
+            }
