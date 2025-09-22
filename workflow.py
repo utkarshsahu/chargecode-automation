@@ -84,7 +84,6 @@ def extract_tasks(natural_text: str, model: str = "gpt-4o-mini"):
     user_prompt = f"Extract the tasks and hours from this text:\n\n{natural_text}"
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    print('hello1')
 
     response = client.chat.completions.create(
               model=model,
