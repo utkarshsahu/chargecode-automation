@@ -66,16 +66,16 @@ def extract_tasks(natural_text: str, model: str = "gpt-4o-mini"):
     system_prompt = """You are an assistant that extracts structured time log data.
   Return ONLY valid JSON: a dictionary containing two keys:
   1 'extracted_date': date mentioned by the user for log entry
-  2. 'tasks': a list of objects with exactly two keys: task (string), hours (integer).
+  2. 'tasks': a list of objects with exactly two keys: task (string formatted as Title Case), hours (float with 1 decimal place).
   - Preserve the order tasks are mentioned.
   - Ignore dates, words like "today", "spent", "doing".
   - Ensure hours are numeric (no text like "two").
   - Examples:
-  1. Today is 1st September 2025. I spent 2 hours doing <task 1>, then I did 1 hour of <task 2> and also I was involved in 2 hours of <task 3>
+  1. Today is 1st September 2025. I spent 2.5 hours doing <task 1>, then I did 1 hour of <task 2> and also I was involved in 2 hours of <task 3>
   Output:
     {
         'extracted_date': '01-Sept-2025',
-        'tasks': [{'task': <task 1>, 'hours': 2},
+        'tasks': [{'task': <task 1>, 'hours': 2.5},
                 {'task': <task 2>, 'hours': 1},
                 {'task': <task 3>, 'hours': 3}]
     }
